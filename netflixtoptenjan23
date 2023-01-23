@@ -1,0 +1,46 @@
+# load libraries 
+library(tidyverse)
+library(ggimage)
+library(ggrepel)
+
+# load data
+# data obtained from top10netflix.com/films, Rotten Tomatoes, and Letterboxd
+films <- read.csv("/Users/Chris/Downloads/nfxtop10jan23.csv")
+
+# select necessary columns from data frame
+films <- subset(films, select = c(movie,audience_score,netflix_ranking,rotten))
+
+# netflix_ranking is an integer; need to turn it into a factor 
+films$netflix_ranking <- as.factor(films$netflix_ranking)
+
+# create scatterplot to show correlation
+ggplot(films,aes(rotten,audience_score,label=movie))+
+  geom_point(size = 3, color = "#E50914")+
+  geom_text_repel(color = "gray64",
+                  min.segment.length = 0, seed = 42, box.padding = 0.5)+
+  theme_minimal() +
+  theme(plot.background = element_rect(fill = "black")) +
+  theme(panel.grid.major = element_line(color = "black")) +
+  theme(panel.grid.minor = element_line(color = "black")) +
+  labs(title = "Rotten Tomatoes Scores of Global Top Ten English Films on Netflix",
+       subtitle = "January 9th to January 15th")+
+  labs(caption="Data: Netflix, Rotten Tomatoes  |  Graphic: Chris Hilsinger-Pate")+
+  labs(x = "Tomatometer", y = "Audience Score")+
+  theme(plot.title = element_text(color = "white",
+                                  face = "bold",
+                                  family = "Tahoma"))+
+  theme(plot.subtitle = element_text(color = "white",
+                                     size = 8,
+                                     family = "Tahoma"))+
+  theme(axis.title.x = element_text(face = "bold"))+
+  theme(axis.title.y = element_text(face = "bold"))+
+  theme(plot.caption = element_text(color = "grey"))+
+  theme(axis.text = element_text(color = "white"))+
+  theme(axis.title = element_text(color = "white"))+
+  theme(legend.text = element_text(color = "white"))+
+  theme(legend.title = element_text(color = "white"))+
+  scale_y_continuous(limits = c(.4, 1), labels = scales::percent)+
+  scale_x_continuous(limits = c(.2,1), labels = scales::percent)
+
+
+# Netflix logo added using Superimpose 
