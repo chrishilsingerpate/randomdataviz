@@ -1,0 +1,202 @@
+# load libraries 
+library(tidyverse)
+library(readxl)
+library(mapdata)
+library(maps)
+library(usmap)
+library(choroplethr)
+library(choroplethrMaps)
+library(sf)
+library(ggimage)
+library(scales)
+
+
+# load BigFoot data set
+bigfoot <- read_excel('/Users/Chris/Downloads/DataDNA Dataset Challenge - February 2023 2.xlsx')
+
+# -----------------------------------------------------------------------------
+# data exploration and data cleaning 
+str(bigfoot)
+
+# only variable that stands out as needing re-formatting is date
+bigfoot$date <- as.Date(bigfoot$date)
+glimpse(bigfoot$date)
+
+summary(bigfoot$dew_point)
+
+
+# let's check for duplicates
+# number column seems to function as the ID; that's the column we'll use to check for duplicates
+n_count <- data.frame(table(bigfoot$number))
+n_count[n_count$Freq > 1,]
+# 0 rows with a frequency greater than 0; no duplicates 
+# because we aren't removing missing values, it seems the data is good to go 
+
+#------------------------------------------------------------------------------
+# data transformation 
+# in order to create the visualizations desired, we need to classify and group
+# some of the data
+# when classifying and grouping certain variables, we will create new data frames
+
+# need to create bins for temperature and humidity to create a heat map
+# going to omit rows that contain NAs for humidity and temperature_mid
+# summary to get an idea of what ranges we're working with 
+summary(bigfoot$temperature_mid)
+summary(bigfoot$humidity)
+
+thcounts <- filter(bigfoot, !is.na(temperature_mid))
+thcounts <- filter(thcounts, !is.na(humidity))
+
+# thcounts contains all observations that have both a temp_mid and humidity value
+
+thcounts$temp_range <- cut(thcounts$temperature_mid, breaks = 
+                             c(-10,0,10,20,30,40,50,60,
+                               70,80,90,100))
+thcounts$humidity_range <- cut(thcounts$humidity, breaks =
+                                 c(0,0.10,0.20,0.30,0.40,
+                                   0.50,0.60,0.70,0.80,
+                                   0.90,1))
+# thcounts1 will have the grouped counts
+thcounts1 <- thcounts %>% 
+  group_by(temp_range,humidity_range) %>% 
+  summarise(count = n())
+
+ggplot(thcounts1, aes(humidity_range,temp_range,fill=count))+
+  geom_tile()+
+  scale_fill_gradient(high = "#143E17", low = "#619263", na.value = "white")+
+  theme(axis.text.x = element_text(angle = -90, vjust = 0.5))+
+  theme(panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "white"),
+        legend.background = element_rect(fill = "white"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank())+
+  labs(fill = "Sightings",x = "Humidity", 
+       y = expression(paste("Temperature (", degree, "F)")))+
+  scale_y_discrete(labels = function(x) gsub(",", " - ", x))+
+  scale_x_discrete(labels = function(x) gsub(",", " - ", x))
+
+
+# let's get the seasons plot set up 
+seasonscount <- filter(bigfoot,!is.na(season))
+seasonscount <- as.data.frame(table(bigfoot$season))
+# doesn't make sense to have an unknown season because that can be traced to the 
+# month so let's remove unknowns
+seasonscount <- subset(seasonscount, Var1 != "Unknown")
+# rename columns 
+colnames(seasonscount) <- c("season","count")
+
+# going to feed it into mutate so we can reorder the seasons by sighting count
+seasonscount %>% 
+  mutate(Season = fct_reorder(season,count)) %>% 
+  ggplot(aes(Season,count))+
+  geom_bar(stat = "identity", fill = "#619263")+
+  theme(panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "white"),
+        panel.grid.minor = element_line(colour = "white"))
+
+
+# think it'd be cool to add image icons for each respective season
+# let's set that up 
+# these are pathways for the PNG images on my personal computer
+simage_df <- data.frame(season = c("Winter","Spring","Fall","Summer"),
+                        image = c("/Users/Chris/Downloads/Seasons Icons/SIX_0C2E1DEA-5AAC-436C-B788-75E7160B5AB0.PNG",
+                                  "/Users/Chris/Downloads/Seasons Icons/SIX_7C8D71DB-ABDE-4039-B6E1-5588ACE34C90.PNG",
+                                  "/Users/Chris/Downloads/Seasons Icons/SIX_F36A8CB9-8A23-499E-9DC2-C8D6B912A062.PNG",
+                                  "/Users/Chris/Downloads/Seasons Icons/SIX_B01022CB-9BA6-4AF2-931C-180187B42EA0.PNG"))
+
+
+# need to join simage_df with seasonscount 
+new_seasonscount <- full_join(seasonscount,simage_df, by = "season")
+
+new_seasonscount %>% 
+  mutate(Season = fct_reorder(season,count)) %>% 
+  ggplot(aes(Season,count))+
+  geom_bar(stat = "identity", fill = "#619263")+
+  theme(panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        panel.grid.major = element_line(colour = "white"),
+        panel.grid.minor = element_line(colour = "white"),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank())+
+  geom_image(aes(x = Season, image = image), y = -3,  
+             size = 0.25, hjust = 0.5, 
+             inherit.aes = FALSE) +
+  labs(x = "Season", y = "Sightings")
+  
+# main data set includes precip_intensity, precip_probability, precip_type, and
+# pressure (which is generally indicative of weather type); type seems like the 
+# best option; rain and snow come to mind when people think of weather 
+ptype <- bigfoot %>% 
+  group_by(precip_type) %>% 
+  summarise(count = n())
+# rename NA as None and fix capitalization
+ptype <- ptype %>% 
+  mutate(precip_type = case_when(
+    precip_type == 'rain' ~ "Rain",
+    precip_type == 'snow' ~ "Snow",
+    TRUE ~ "None"
+  ))
+
+ptype$percent <- ptype$count/sum(ptype$count)
+
+hsize <- 2
+ptype <- ptype %>% 
+  mutate(x = hsize)
+
+ggplot(ptype, aes(hsize, percent, fill = precip_type))+
+  geom_col()+
+  coord_polar(theta = "y")+
+  geom_text(aes(label = scales::percent(percent, accuracy = 0.1)),
+          position = position_stack(vjust = 0.5),
+          color = "white", fontface= "bold")+
+  xlim(c(0.2, hsize + 0.5))+
+  scale_fill_manual(values = c("#9FC9A1","#6DA770","#143E17"))+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme(panel.background = element_rect(fill = "white"),
+        panel.grid = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.text = element_blank())+
+  labs(fill = "Precipitation Type")
+
+
+# time to plot what states are the home of the most Bigfoot sightings 
+# remove any NAs 
+states <- filter(bigfoot, !is.na(state))
+statecounts <- states %>% 
+  group_by(state) %>% 
+  summarise(count = n())
+
+statepop <- subset(statepop, !(abbr %in% c("HI","DC")))
+
+statecounts$fips <- statepop$fips
+statecounts$abbr <- statepop$abbr
+
+# graph looks good; more extensive labels will be added elsewhere 
+plot_usmap(data = statecounts,
+           values = "count",
+           labels = FALSE)+
+  scale_fill_gradient(low = "#9FC9A1",
+                      high = "#143E17")+
+  theme(legend.position = c(0.2,-0.1),
+        legend.direction = 'horizontal',
+        legend.key.width = unit(0.6, "in"),
+        legend.key.height = unit(0.2, "in"),
+        legend.text = element_text(size = 12))+
+  labs(fill = "Sightings")
+
+# uv index info
+uv <- filter(bigfoot, !is.na(uv_index))
+summary(uv$uv_index)
+# visibility info 
+vis <- filter(bigfoot, !is.na(visibility))
+summary(vis$visibility)
+# wind speed info 
+wind_speed <- filter(bigfoot, !is.na(wind_speed))
+summary(wind_speed$wind_speed)
+# date info 
+bfdate <- filter(bigfoot, !is.na(date))
+min(bfdate$date)
